@@ -4,13 +4,12 @@ import com.github.mmolimar.kafka.connect.fs.AbstractHdfsFsConfig;
 import com.github.mmolimar.kafka.connect.fs.AbstractLocalFsConfig;
 import com.github.mmolimar.kafka.connect.fs.FsSourceTask;
 import com.github.mmolimar.kafka.connect.fs.FsTestConfig;
+import com.github.mmolimar.kafka.connect.fs.file.reader.FileReader;
+import com.github.mmolimar.kafka.connect.fs.file.reader.ReaderFsTestConfig;
 import org.apache.hadoop.fs.Path;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 interface TaskFsTestConfig extends FsTestConfig {
 
@@ -26,7 +25,7 @@ interface TaskFsTestConfig extends FsTestConfig {
 
 }
 
-class LocalFsConfig extends AbstractLocalFsConfig implements TaskFsTestConfig {
+class LocalFsConfig extends AbstractLocalFsConfig implements TaskFsTestConfig, ReaderFsTestConfig {
     private FsSourceTask task;
     private Map<String, String> taskConfig;
     private List<Path> directories;
@@ -40,6 +39,7 @@ class LocalFsConfig extends AbstractLocalFsConfig implements TaskFsTestConfig {
         for (Path dir : directories) {
             getFs().mkdirs(dir);
         }
+        offsetsByIndex = new HashMap<>();
     }
 
     @Override
@@ -65,11 +65,40 @@ class LocalFsConfig extends AbstractLocalFsConfig implements TaskFsTestConfig {
     @Override
     public List<Path> getDirectories() {
         return directories;
+    }
+
+    private Path dataFile;
+    private FileReader reader;
+    private Map<Integer, Long> offsetsByIndex;
+
+    @Override
+    public Path getDataFile() {
+        return dataFile;
+    }
+
+    @Override
+    public void setDataFile(Path dataFile) {
+        this.dataFile = dataFile;
+    }
+
+    @Override
+    public void setReader(FileReader reader) {
+        this.reader = reader;
+    }
+
+    @Override
+    public FileReader getReader() {
+        return reader;
+    }
+
+    @Override
+    public Map<Integer, Long> offsetsByIndex() {
+        return offsetsByIndex;
     }
 
 }
 
-class HdfsFsConfig extends AbstractHdfsFsConfig implements TaskFsTestConfig {
+class HdfsFsConfig extends AbstractHdfsFsConfig implements TaskFsTestConfig, ReaderFsTestConfig {
     private FsSourceTask task;
     private Map<String, String> taskConfig;
     private List<Path> directories;
@@ -78,11 +107,12 @@ class HdfsFsConfig extends AbstractHdfsFsConfig implements TaskFsTestConfig {
     public void init() throws IOException {
         directories = new ArrayList<Path>() {{
             add(new Path(getFsUri().toString(), UUID.randomUUID().toString()));
-            add(new Path(getFsUri().toString(), UUID.randomUUID().toString()));
+//            add(new Path(getFsUri().toString(), UUID.randomUUID().toString()));
         }};
         for (Path dir : directories) {
             getFs().mkdirs(dir);
         }
+        offsetsByIndex = new HashMap<>();
     }
 
     @Override
@@ -108,6 +138,35 @@ class HdfsFsConfig extends AbstractHdfsFsConfig implements TaskFsTestConfig {
     @Override
     public List<Path> getDirectories() {
         return directories;
+    }
+
+    private Path dataFile;
+    private FileReader reader;
+    private Map<Integer, Long> offsetsByIndex;
+
+    @Override
+    public Path getDataFile() {
+        return dataFile;
+    }
+
+    @Override
+    public void setDataFile(Path dataFile) {
+        this.dataFile = dataFile;
+    }
+
+    @Override
+    public void setReader(FileReader reader) {
+        this.reader = reader;
+    }
+
+    @Override
+    public FileReader getReader() {
+        return reader;
+    }
+
+    @Override
+    public Map<Integer, Long> offsetsByIndex() {
+        return offsetsByIndex;
     }
 
 }

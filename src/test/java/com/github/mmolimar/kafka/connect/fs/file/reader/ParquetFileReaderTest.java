@@ -1,5 +1,6 @@
 package com.github.mmolimar.kafka.connect.fs.file.reader;
 
+import com.github.mmolimar.kafka.connect.fs.FsSourceTaskConfig;
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
@@ -26,6 +27,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -178,6 +180,36 @@ public class ParquetFileReaderTest extends FileReaderTestBase {
                 throw e.getCause();
             }
         });
+    }
+
+    @ParameterizedTest
+    @MethodSource("fileSystemConfigProvider")
+    public void readAllDataInBatches(ReaderFsTestConfig fsConfig) {
+        Map<String, Object> readerConfig = getReaderConfig();
+        int batchSize = 10;
+        readerConfig.put(ParquetFileReader.FILE_READER_PARQUET_SCHEMA, readerSchema.toString());
+        readerConfig.put(AgnosticFileReader.FILE_READER_AGNOSTIC_EXTENSIONS_PARQUET, getFileExtension());
+        readerConfig.put(FsSourceTaskConfig.FILE_READER_BATCH_SIZE, batchSize);
+
+        AbstractFileReader<?> reader = (AbstractFileReader<?>) getReader(fsConfig.getFs(), fsConfig.getDataFile(), readerConfig);
+        assertTrue(reader.hasNext());
+
+        int recordCount = 0;
+        int batchCount = 0;
+
+        while (reader.hasNextBatch()) {
+            reader.nextBatch();
+            while (reader.hasNext()) {
+                Struct record = reader.next();
+                checkData(record, recordCount);
+                recordCount++;
+            }
+            batchCount++;
+        }
+
+        assertThrows(NoSuchElementException.class, reader::nextBatch);
+        assertEquals(NUM_RECORDS / batchSize, batchCount, "The number of batches processed does not match");
+        assertEquals(NUM_RECORDS, recordCount, "The number of records in the file does not match");
     }
 
     @Override

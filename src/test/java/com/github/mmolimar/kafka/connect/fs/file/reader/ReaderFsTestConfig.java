@@ -8,7 +8,7 @@ import org.apache.hadoop.fs.Path;
 import java.util.HashMap;
 import java.util.Map;
 
-interface ReaderFsTestConfig extends FsTestConfig {
+public interface ReaderFsTestConfig extends FsTestConfig {
 
     void setDataFile(Path dataFile);
 

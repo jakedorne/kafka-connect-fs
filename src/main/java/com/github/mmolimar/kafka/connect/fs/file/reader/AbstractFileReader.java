@@ -76,8 +76,9 @@ public abstract class AbstractFileReader<T> implements FileReader {
     public final boolean hasNext() {
         checkClosed();
         try {
-            return (batchSize <= 0 || offset == 0 || offset % batchSize != 0 || (offset % batchSize == 0 && seeked)) &&
+            boolean hasNext = (batchSize <= 0 || offset == 0 || offset % batchSize != 0 || (offset % batchSize == 0 && seeked)) &&
                     hasNextRecord();
+            return hasNext;
         } catch (ConnectException ce) {
             throw ce;
         } catch (Exception e) {

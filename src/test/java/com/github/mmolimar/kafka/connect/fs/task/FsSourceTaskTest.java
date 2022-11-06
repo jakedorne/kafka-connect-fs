@@ -2,11 +2,16 @@ package com.github.mmolimar.kafka.connect.fs.task;
 
 import com.github.mmolimar.kafka.connect.fs.FsSourceTask;
 import com.github.mmolimar.kafka.connect.fs.FsSourceTaskConfig;
-import com.github.mmolimar.kafka.connect.fs.file.reader.AvroFileReader;
-import com.github.mmolimar.kafka.connect.fs.file.reader.TextFileReader;
+import com.github.mmolimar.kafka.connect.fs.InMemoryFsContext;
+import com.github.mmolimar.kafka.connect.fs.InMemoryFsSourceTask;
+import com.github.mmolimar.kafka.connect.fs.file.reader.*;
 import com.github.mmolimar.kafka.connect.fs.policy.CronPolicy;
 import com.github.mmolimar.kafka.connect.fs.policy.Policy;
 import com.github.mmolimar.kafka.connect.fs.policy.SimplePolicy;
+import com.github.mmolimar.kafka.connect.fs.policy.SleepyPolicy;
+import org.apache.avro.Schema;
+import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.kafka.connect.data.Struct;
@@ -14,6 +19,9 @@ import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTaskContext;
 import org.apache.kafka.connect.storage.OffsetStorageReader;
+import org.apache.parquet.avro.AvroParquetWriter;
+import org.apache.parquet.hadoop.ParquetFileWriter;
+import org.apache.parquet.hadoop.ParquetWriter;
 import org.easymock.Capture;
 import org.easymock.CaptureType;
 import org.easymock.EasyMock;
@@ -43,10 +51,10 @@ import static org.junit.jupiter.api.Assertions.*;
 public class FsSourceTaskTest {
 
     private static final List<TaskFsTestConfig> TEST_FILE_SYSTEMS = Arrays.asList(
-            new LocalFsConfig(),
+//            new LocalFsConfig(),
             new HdfsFsConfig()
     );
-    private static final int NUM_RECORDS = 10;
+    private static final int NUM_RECORDS = 500;
     private static final long NUM_BYTES_PER_FILE = 390;
     private static final String FILE_ALREADY_PROCESSED = "0101010101010101.txt";
 
@@ -74,53 +82,58 @@ public class FsSourceTaskTest {
                 put(FsSourceTaskConfig.TOPIC, "topic_test");
                 put(FsSourceTaskConfig.POLICY_CLASS, SimplePolicy.class.getName());
                 put(FsSourceTaskConfig.FILE_READER_CLASS, TextFileReader.class.getName());
-                put(FsSourceTaskConfig.POLICY_REGEXP, "^[0-9]*\\.txt$");
+                put(FsSourceTaskConfig.POLICY_REGEXP, ".*\\.parquet$");
             }};
 
-            // Mock initialization
-            SourceTaskContext taskContext = PowerMock.createMock(SourceTaskContext.class);
-            OffsetStorageReader offsetStorageReader = PowerMock.createMock(OffsetStorageReader.class);
+            //region Mock initialization
+//            SourceTaskContext taskContext = PowerMock.createMock(SourceTaskContext.class);
+//            OffsetStorageReader offsetStorageReader = PowerMock.createMock(OffsetStorageReader.class);
+//
+//            EasyMock.expect(taskContext.offsetStorageReader())
+//                    .andReturn(offsetStorageReader)
+//                    .times(2);
+//
+//            // Every time the `offsetStorageReader.offsets(params)` method is called we want to capture the offsets params
+//            // and return a different result based on the offset params passed in
+//            // In this case, returning a different result based on the file path of the params
+//            Capture<Collection<Map<String, Object>>> captureOne = Capture.newInstance(CaptureType.ALL);
+//            AtomicInteger executionNumber = new AtomicInteger();
+//            EasyMock.expect(
+//                    offsetStorageReader.offsets(EasyMock.capture(captureOne))
+//            ).andAnswer(() -> {
+//                List<Collection<Map<String, Object>>> capturedValues = captureOne.getValues();
+//                Collection<Map<String, Object>> captured = capturedValues.get(executionNumber.get());
+//                executionNumber.addAndGet(1);
+//
+//                Map<Map<String, Object>, Map<String, Object>> map = new HashMap<>();
+//                captured.forEach(part -> {
+//                    if (((String) (part.get("path"))).endsWith(FILE_ALREADY_PROCESSED)) {
+//                        map.put(part, new HashMap<String, Object>() {{
+//                            put("offset", (long) NUM_RECORDS);
+//                            put("eof", true);
+//                            put("file-size", NUM_BYTES_PER_FILE);
+//                        }});
+//                    } else {
+//                        map.put(part, new HashMap<String, Object>() {{
+//                            put("offset", (long) NUM_RECORDS / 2);
+//                        }});
+//                    }
+//                });
+//                return map;
+//            }).times(2);
+//
+//            EasyMock.checkOrder(taskContext, false);
+//            EasyMock.replay(taskContext);
+//
+//            EasyMock.checkOrder(offsetStorageReader, false);
+//            EasyMock.replay(offsetStorageReader);
+            //endregion
 
-            EasyMock.expect(taskContext.offsetStorageReader())
-                    .andReturn(offsetStorageReader)
-                    .times(2);
+            //region Stub initialization
+            InMemoryFsContext taskContext = new InMemoryFsContext();
+            //endregion
 
-            // Every time the `offsetStorageReader.offsets(params)` method is called we want to capture the offsets params
-            // and return a different result based on the offset params passed in
-            // In this case, returning a different result based on the file path of the params
-            Capture<Collection<Map<String, Object>>> captureOne = Capture.newInstance(CaptureType.ALL);
-            AtomicInteger executionNumber = new AtomicInteger();
-            EasyMock.expect(
-                    offsetStorageReader.offsets(EasyMock.capture(captureOne))
-            ).andAnswer(() -> {
-                List<Collection<Map<String, Object>>> capturedValues = captureOne.getValues();
-                Collection<Map<String, Object>> captured = capturedValues.get(executionNumber.get());
-                executionNumber.addAndGet(1);
-
-                Map<Map<String, Object>, Map<String, Object>> map = new HashMap<>();
-                captured.forEach(part -> {
-                    if (((String) (part.get("path"))).endsWith(FILE_ALREADY_PROCESSED)) {
-                        map.put(part, new HashMap<String, Object>() {{
-                            put("offset", (long) NUM_RECORDS);
-                            put("eof", true);
-                            put("file-size", NUM_BYTES_PER_FILE);
-                        }});
-                    } else {
-                        map.put(part, new HashMap<String, Object>() {{
-                            put("offset", (long) NUM_RECORDS / 2);
-                        }});
-                    }
-                });
-                return map;
-            }).times(2);
-
-            EasyMock.checkOrder(taskContext, false);
-            EasyMock.replay(taskContext);
-
-            EasyMock.checkOrder(offsetStorageReader, false);
-            EasyMock.replay(offsetStorageReader);
-
-            FsSourceTask task = new FsSourceTask();
+            FsSourceTask task = new InMemoryFsSourceTask();
             task.initialize(taskContext);
 
             fsConfig.setTaskConfig(taskConfig);
@@ -143,6 +156,120 @@ public class FsSourceTaskTest {
         return TEST_FILE_SYSTEMS.stream().map(Arguments::of);
     }
 
+    protected Path createDataFile(TaskFsTestConfig fsConfig, Path path) throws IOException {
+        FileSystem fs = fsConfig.getFs();
+        File parquetFile = File.createTempFile("test-", ".parquet");
+        Schema readerSchema = new Schema.Parser().parse(
+                ParquetFileReaderTest.class.getResourceAsStream("/file/reader/schemas/people.avsc"));
+
+        try (ParquetWriter<GenericRecord> writer = AvroParquetWriter.<GenericRecord>builder(new Path(parquetFile.toURI()))
+                .withConf(fs.getConf()).withWriteMode(ParquetFileWriter.Mode.OVERWRITE).withSchema(readerSchema).build()) {
+            IntStream.range(0, NUM_RECORDS).forEach(index -> {
+                GenericRecord datum = new GenericData.Record(readerSchema);
+                datum.put("index", index);
+                String uuid = UUID.randomUUID().toString();
+                datum.put("name", String.format("%d_name_%s", index, uuid));
+                datum.put("surname", String.format("%d_surname_%s", index, uuid));
+                try {
+                    ((ReaderFsTestConfig) fsConfig).offsetsByIndex().put(index, (long) index);
+                    writer.write(datum);
+                } catch (IOException ioe) {
+                    throw new RuntimeException(ioe);
+                }
+            });
+        }
+        fs.moveFromLocalFile(new Path(parquetFile.getAbsolutePath()), path);
+        return path;
+    }
+
+    @ParameterizedTest
+    @MethodSource("fileSystemConfigProvider")
+    public void parquetBatch(TaskFsTestConfig fsConfig) throws IOException {
+        for (Path dir : fsConfig.getDirectories()) {
+            Path dataFile = new Path(dir, System.nanoTime() + ".parquet");
+            createDataFile(fsConfig, dataFile);
+        }
+
+        int readerBatchSize = 8;
+        Map<String, String> taskConfig = fsConfig.getTaskConfig();
+        taskConfig.put(FsSourceTaskConfig.POLICY_CLASS, SleepyPolicy.class.getName());
+        taskConfig.put(SleepyPolicy.SLEEPY_POLICY_SLEEP_MS, "1000");
+        taskConfig.put(FsSourceTaskConfig.FILE_READER_BATCH_SIZE, String.valueOf(readerBatchSize));
+        taskConfig.put(FsSourceTaskConfig.POLL_INTERVAL_MS, "1000");
+        taskConfig.put(FsSourceTaskConfig.FILE_READER_CLASS, ParquetFileReader.class.getName());
+
+        FsSourceTask task = fsConfig.getTask();
+        task.start(taskConfig);
+
+        int expectedBatchSize = (readerBatchSize % (NUM_RECORDS / 2) * fsConfig.getDirectories().size());
+
+        List<SourceRecord> firstBatch = task.poll();
+        checkRecords(firstBatch);
+        assertEquals(expectedBatchSize, firstBatch.size());
+
+        List<SourceRecord> secondBatch = task.poll();
+        checkRecords(secondBatch);
+        assertEquals(expectedBatchSize, secondBatch.size());
+
+        List<SourceRecord> thirdBatch = task.poll();
+        checkRecords(thirdBatch);
+        assertEquals(expectedBatchSize, thirdBatch.size());
+
+        List<SourceRecord> fourthBatch = task.poll();
+        checkRecords(fourthBatch);
+        assertEquals(expectedBatchSize, fourthBatch.size());
+
+        SourceRecord record1 = firstBatch.get(0);
+        SourceRecord record2 =  secondBatch.get(0);
+        SourceRecord record3 =  thirdBatch.get(0);
+        SourceRecord record4 =  fourthBatch.get(0);
+
+        String name1 = ((Struct) record1.value()).get(record1.valueSchema().fields().get(0)).toString();
+        String name2 = ((Struct) record2.value()).get(record2.valueSchema().fields().get(0)).toString();
+        String name3 = ((Struct) record3.value()).get(record3.valueSchema().fields().get(0)).toString();
+        String name4 = ((Struct) record4.value()).get(record4.valueSchema().fields().get(0)).toString();
+
+        assertNotEquals(name1, name2);
+        assertNotEquals(name1, name3);
+        assertNotEquals(name1, name4);
+//        assertNotEquals(name2, name3);
+//        assertNotEquals(name2, name4);
+//        assertNotEquals(name3, name4);
+
+        // policy has ended
+        fsConfig.getTask().stop();
+
+        assertNull(fsConfig.getTask().poll());
+    }
+
+    @ParameterizedTest
+    @MethodSource("fileSystemConfigProvider")
+    public void oneFilePerFsWithBatch(TaskFsTestConfig fsConfig) throws IOException {
+        for (Path dir : fsConfig.getDirectories()) {
+            Path dataFile = new Path(dir, System.nanoTime() + ".txt");
+            createDataFile(fsConfig.getFs(), dataFile);
+            // this file does not match the regexp
+            fsConfig.getFs().createNewFile(new Path(dir, String.valueOf(System.nanoTime())));
+        }
+
+        Map<String, String> props = new HashMap<>(fsConfig.getTaskConfig());
+        props.put(FsSourceTaskConfig.POLICY_BATCH_SIZE, "1");
+        fsConfig.getTask().start(props);
+
+        List<SourceRecord> records = new ArrayList<>();
+        List<SourceRecord> fresh = fsConfig.getTask().poll();
+        while (fresh != null) {
+            records.addAll(fresh);
+            fresh = fsConfig.getTask().poll();
+        }
+
+        assertEquals((NUM_RECORDS * fsConfig.getDirectories().size()) / 2, records.size());
+        checkRecords(records);
+        // policy has ended
+        assertNull(fsConfig.getTask().poll());
+    }
+
+    //region Tests
     @ParameterizedTest
     @MethodSource("fileSystemConfigProvider")
     public void pollNoData(TaskFsTestConfig fsConfig) {
@@ -419,32 +546,6 @@ public class FsSourceTaskTest {
         assertNull(fsConfig.getTask().poll());
     }
 
-    @ParameterizedTest
-    @MethodSource("fileSystemConfigProvider")
-    public void oneFilePerFsWithBatch(TaskFsTestConfig fsConfig) throws IOException {
-        for (Path dir : fsConfig.getDirectories()) {
-            Path dataFile = new Path(dir, System.nanoTime() + ".txt");
-            createDataFile(fsConfig.getFs(), dataFile);
-            // this file does not match the regexp
-            fsConfig.getFs().createNewFile(new Path(dir, String.valueOf(System.nanoTime())));
-        }
-
-        Map<String, String> props = new HashMap<>(fsConfig.getTaskConfig());
-        props.put(FsSourceTaskConfig.POLICY_BATCH_SIZE, "1");
-        fsConfig.getTask().start(props);
-
-        List<SourceRecord> records = new ArrayList<>();
-        List<SourceRecord> fresh = fsConfig.getTask().poll();
-        while (fresh != null) {
-            records.addAll(fresh);
-            fresh = fsConfig.getTask().poll();
-        }
-
-        assertEquals((NUM_RECORDS * fsConfig.getDirectories().size()) / 2, records.size());
-        checkRecords(records);
-        // policy has ended
-        assertNull(fsConfig.getTask().poll());
-    }
 
     @ParameterizedTest
     @MethodSource("fileSystemConfigProvider")
@@ -474,6 +575,7 @@ public class FsSourceTaskTest {
         assertNull(fsConfig.getTask().poll());
     }
 
+    //endregion
 
     protected void checkRecords(List<SourceRecord> records) {
         records.forEach(record -> {
@@ -482,7 +584,7 @@ public class FsSourceTaskTest {
             assertNotNull(record.sourceOffset());
             assertNotNull(record.value());
 
-            assertNotNull(((Struct) record.value()).get(TextFileReader.FIELD_NAME_VALUE_DEFAULT));
+            assertNotNull(((Struct) record.value()).get(record.valueSchema().fields().get(0)));
         });
     }
 
